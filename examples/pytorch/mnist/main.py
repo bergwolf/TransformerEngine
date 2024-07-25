@@ -153,7 +153,7 @@ def main():
     )
     parser.add_argument("--seed", type=int, default=1, metavar="S", help="random seed (default: 1)")
     parser.add_argument(
-        "--loss-file",
+        "--lossfile",
         type=str,
         default="loss-mnist.png",
         metavar="STR",
@@ -239,7 +239,7 @@ def main():
     plt.xlabel("iterations")
     plt.ylabel("Loss")
     plt.legend()
-    plt.savefig(args.loss-file)
+    plt.savefig(args.lossfile)
     plt.show()
 
 
