@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import matplotlib.pyplot as plt
+
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
@@ -46,7 +48,7 @@ class Net(nn.Module):
         return output
 
 
-def train(args, model, device, train_loader, optimizer, epoch, use_fp8):
+def train(args, model, device, train_loader, optimizer, epoch, use_fp8, train_losses):
     """Training function."""
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -56,6 +58,7 @@ def train(args, model, device, train_loader, optimizer, epoch, use_fp8):
             output = model(data)
         loss = F.nll_loss(output, target)
         loss.backward()
+        train_losses.append(loss.item())
         optimizer.step()
         if batch_idx % args.log_interval == 0:
             print(
@@ -80,7 +83,7 @@ def calibrate(model, device, test_loader, fp8):
                 output = model(data)
 
 
-def test(model, device, test_loader, use_fp8):
+def test(model, device, test_loader, use_fp8, val_losses):
     """Testing function."""
     model.eval()
     test_loss = 0
@@ -90,7 +93,8 @@ def test(model, device, test_loader, use_fp8):
             data, target = data.to(device), target.to(device)
             with te.fp8_autocast(enabled=use_fp8):
                 output = model(data)
-            test_loss += F.nll_loss(output, target, reduction="sum").item()  # sum up batch loss
+            test_loss += F.nll_loss(output, target, reduction="sum").item() # sum up batch loss
+            val_losses.append(F.nll_loss(output, target).item())
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
@@ -149,6 +153,13 @@ def main():
     )
     parser.add_argument("--seed", type=int, default=1, metavar="S", help="random seed (default: 1)")
     parser.add_argument(
+        "--loss-file",
+        type=str,
+        default="loss-mnist.png",
+        metavar="STR",
+        help="where to save the loss image file",
+    )
+    parser.add_argument(
         "--log-interval",
         type=int,
         default=10,
@@ -203,9 +214,12 @@ def main():
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
+    val_losses = []
+    train_losses = []
+
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch, args.use_fp8)
-        test(model, device, test_loader, args.use_fp8)
+        train(args, model, device, train_loader, optimizer, epoch, args.use_fp8, train_losses)
+        test(model, device, test_loader, args.use_fp8, val_losses)
         scheduler.step()
 
     if args.use_fp8_infer and not args.use_fp8:
@@ -217,6 +231,16 @@ def main():
         weights = torch.load("mnist_cnn.pt")
         model.load_state_dict(weights)
         test(model, device, test_loader, args.use_fp8_infer)
+
+    plt.figure(figsize=(10,5))
+    plt.title("Training and Validation Loss")
+    plt.plot(val_losses,label="val")
+    plt.plot(train_losses,label="train")
+    plt.xlabel("iterations")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.savefig(args.loss-file)
+    plt.show()
 
 
 if __name__ == "__main__":
